@@ -1,0 +1,11 @@
+﻿<RevitAddIns>
+    <AddIn Type="Application">
+        <Name>StairFinishing</Name>
+        <Assembly>StairFinishing/StairFinishing.dll</Assembly>
+        <AddInId>2E8A2345-9B60-4D9B-AD1B-7D82E06B495C</AddInId>
+        <FullClassName>StairFinishing.Application</FullClassName>
+        <VendorId>Development</VendorId>
+        <VendorDescription></VendorDescription>
+        <VendorEmail></VendorEmail>
+    </AddIn>
+</RevitAddIns>
