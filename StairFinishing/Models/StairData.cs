@@ -9,23 +9,22 @@ using Autodesk.Revit.DB.IFC;
 
 namespace StairFinishing.Models
 {
+    #nullable enable
     internal class StairData
     {
-        const double METERS_IN_FOOT = 0.3048;
-        const double SQ_METERS_IN_SQ_FOOT = METERS_IN_FOOT * METERS_IN_FOOT;
         ReceiveFinishingArea receiveFinishingArea;
         internal Stairs stair { get; }
-        Room room { get; }
+        Room? room { get; }
         internal double treadsArea;
         internal double risersArea;
         internal double landingsArea;
         internal double runLowerFacesArea;
         internal double landingLowerFacesArea;
-        internal string roomNumber;
-        internal string roomName;
-        double treadDepth;
-        double riserHeight;
-        double treadThickness;
+        internal string? roomNumber;
+        internal string? roomName;
+        private double treadDepth;
+        private double riserHeight;
+        private double treadThickness;
         IEnumerable<IGrouping<bool, Face>> sideFacesWithAndWithoutFinishing;
         internal double sideFacesFinishingArea;
         internal double skirtingsArea;
@@ -149,7 +148,7 @@ namespace StairFinishing.Models
              * Берет все грани по ребрам с предыдущего шага
              * Отделяет от всех граней грани с предыдущего шага
              * Берет толко вертикальные грани
-             * Строит точку на расстоянии 2 дюйма от центра грани и проверяет, находится ли эта точка в помещении
+             * Строит точку на расстоянии 2 дюйма (запас на погрешности в построении модели) от центра грани и проверяет, находится ли эта точка в помещении
              * Группирует грани на пристеночные и внурти помещения и кладет в список для дальнейшего расчета плинтуса
              * Возвращает сумму площадей внутренних граней
              */
@@ -161,12 +160,12 @@ namespace StairFinishing.Models
             stairElements.AddRange(landings);
             List<Face> stairFaces = stairElements.SelectMany(GetStairElementFaces).ToList();
             IEnumerable<Edge> stairEdges = stairElements.SelectMany(GetStairElementEdges);
-            var stairPath = runs.SelectMany(run => run.GetStairsPath() as IEnumerable<Curve>).ToList();
+            List<Curve> stairPath = runs.SelectMany(run => run.GetStairsPath() as IEnumerable<Curve>).ToList();
             stairPath.AddRange(landings.SelectMany(landing => landing.GetStairsPath() as IEnumerable<Curve>));
-            var facesIntersectedPath = stairEdges
+            IEnumerable<Face> facesIntersectedPath = stairEdges
                 .Where(currentEdge =>
                 {
-                    var curve = currentEdge.AsCurve(); // Ошибка при конвертации арки в линию
+                    var curve = currentEdge.AsCurve(); 
                     if (curve.GetEndPoint(0).X.IsAlmostEqual(curve.GetEndPoint(1).X)
                         && curve.GetEndPoint(0).Y.IsAlmostEqual(curve.GetEndPoint(1).Y))
                         return false;
@@ -187,9 +186,15 @@ namespace StairFinishing.Models
                 .Distinct();
             stairFaces.RemoveAll(f => facesIntersectedPath.Contains(f));
             sideFacesWithAndWithoutFinishing = stairFaces
-                .Where(face => face.ComputeNormal(new UV(0.5, 0.5)).Z == 0)
-                .GroupBy(face => room.IsPointInRoom(face.Evaluate(new UV(0.5, 0.5)) + (face.ComputeNormal(new UV(0.5, 0.5)) / 6)));
-                        
+                .Where(face => face.ComputeNormal(new UV(0.5, 0.5)).Z.IsAlmostEqual(0.0))
+                .GroupBy(face => 
+                {
+                    if (room == null)
+                        return true;
+                    else
+                        return room.IsPointInRoom(GetPointOnFace(face) + (face.ComputeNormal(new UV(0.5, 0.5)) / 6));
+                });
+
             return sideFacesWithAndWithoutFinishing
                 .Where(g => g.Key)
                 .SelectMany(g => g)
@@ -206,7 +211,7 @@ namespace StairFinishing.Models
              * Горизонтальные ребра берет те, которые находятся на верху грани
              * Возвращает сумму длин ребер умноженную на высоту плинтуса
              */
-
+            
             IEnumerable<Curve> allLines = sideFacesWithAndWithoutFinishing
                 .Where(g => !g.Key)
                 .SelectMany(group => group)
@@ -226,7 +231,7 @@ namespace StairFinishing.Models
                     acc + face
                         .GetEdgesAsCurveLoops()
                         .SelectMany(curveLoop => curveLoop)
-                        .Where(curve => curve.GetEndPoint(0).Z == curve.GetEndPoint(1).Z)
+                        .Where(curve => curve.GetEndPoint(0).Z.IsAlmostEqual(curve.GetEndPoint(1).Z))
                         .OrderByDescending(curve => curve.GetEndPoint(0).Z)
                         .First()
                         .Length
@@ -235,17 +240,17 @@ namespace StairFinishing.Models
             return (riserLinesLength + horisontalLinesLength) * skirtingHeight;
         }
 
-        private string GetRoomNumber()
+        private string? GetRoomNumber()
         {
-            return room
+            return room?
                 // Берет значение параметра ПО_№_Помещения
                 .FindParameter(new Guid("e0c30580-14c7-4cb0-8be2-444179eb94c9"))
                 .AsString();
         }
 
-        private string GetRoomName()
+        private string? GetRoomName()
         {
-            return room
+            return room?
                 .FindParameter(BuiltInParameter.ROOM_NAME) // Берет значение параметра Имя
                 .AsString();
         }
@@ -302,27 +307,27 @@ namespace StairFinishing.Models
                 }
             }
             return result;
-    }
-
-    private List<Edge> GetStairElementEdges(Element stairElement)
-    {
-        List<Edge> result = [];
-        foreach (EdgeArray edges in stairElement
-            .get_Geometry(new Options() { DetailLevel = ViewDetailLevel.Coarse })
-            .ToList()
-            .Where(gItem => gItem is Solid)
-            .Select(gItem => (gItem as Solid).Edges))
-        {
-            foreach (object edge in edges)
-            {
-                if (edge is Edge)
-                    result.Add(edge as Edge);
-            }
         }
-        return result;
-    }
 
-    private Room GetRoom()
+        private List<Edge> GetStairElementEdges(Element stairElement)
+        {
+            List<Edge> result = [];
+            foreach (EdgeArray edges in stairElement
+                .get_Geometry(new Options() { DetailLevel = ViewDetailLevel.Coarse })
+                .ToList()
+                .Where(gItem => gItem is Solid)
+                .Select(gItem => (gItem as Solid).Edges))
+            {
+                foreach (object edge in edges)
+                {
+                    if (edge is Edge)
+                        result.Add(edge as Edge);
+                }
+            }
+            return result;
+        }
+
+        private Room? GetRoom()
         {
             StairsRun firstRun = stair.GetStairsRuns()
                 .Select(id => receiveFinishingArea.Document.GetElement(id).Cast<StairsRun>())
@@ -331,7 +336,16 @@ namespace StairFinishing.Models
                 .get_Geometry(new Options() { DetailLevel = ViewDetailLevel.Coarse })
                 .First(item => item is Solid) as Solid)
                 .ComputeCentroid();
-            return receiveFinishingArea.allRooms.First(room => room.IsPointInRoom(firstRunCentroid));
+            return receiveFinishingArea.allRooms.FirstOrDefault(room => room.IsPointInRoom(firstRunCentroid));
+        }
+
+        private XYZ GetPointOnFace(Face face)
+        {
+            return face.GetEdgesAsCurveLoops()
+                .SelectMany(curveLoop => curveLoop)
+                .OrderByDescending(curve => curve.GetEndPoint(0).Z + curve.GetEndPoint(1).Z)
+                .First()
+                .Evaluate(0.5, false);
         }
     }
 
